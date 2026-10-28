@@ -5,14 +5,18 @@ const express = require('express');
 const { validate, extractSchema, finalizeSchema, submitSchema } = require('./validation');
 const { buildResponse } = require('./services/processor');
 const { todayIn } = require('./services/normalize');
+const { resolveOverrides } = require('./services/flexibleInput');
 
 /**
  * @param {object} deps
  * @param {object} deps.config
  * @param {Function} deps.extract  async ({smsText,image,customerMessage,today}) => {data, model, usage}
+ * @param {Function} [deps.llmNormalize] async ({date,time,amount,today,timeZone}) => {date_iso,time_24h,amount}
  * @param {Function} [deps.fetchImpl] used to forward to SBI's complaint API
  */
-function createApp({ config, extract, fetchImpl = fetch }) {
+function createApp({ config, extract, llmNormalize = null, fetchImpl = fetch }) {
+  const resolve = (overrides, today) => resolveOverrides(overrides, { today, timeZone: config.timeZone, llmNormalize });
+
   const app = express();
   app.disable('x-powered-by');
   app.use(express.json({ limit: `${config.maxBodyMb}mb` }));
@@ -50,12 +54,15 @@ function createApp({ config, extract, fetchImpl = fetch }) {
       const b = req.body;
       const today = todayIn(config.timeZone);
       const t0 = Date.now();
-      const { data, model, usage } = await extract({ smsText: b.sms_text, image: b.image, customerMessage: b.customer_message, today });
+      const [{ data, model, usage }, resolved] = await Promise.all([
+        extract({ smsText: b.sms_text, image: b.image, customerMessage: b.customer_message, today }),
+        resolve(b.overrides, today),
+      ]);
       const result = buildResponse({
         extraction: data,
         smsText: b.sms_text,
         hasImage: Boolean(b.image),
-        overrides: b.overrides,
+        overrides: resolved.overrides,
         twixRequestId: b.twix_request_id,
         mobileNumber: b.mobile_number,
         config,
@@ -71,20 +78,24 @@ function createApp({ config, extract, fetchImpl = fetch }) {
    * Stateless follow-up: send back the `extraction` from /extract plus the
    * values the bot collected from the customer (overrides). No LLM call.
    */
-  app.post('/v1/complaints/finalize', validate(finalizeSchema), (req, res) => {
-    const b = req.body;
-    const today = todayIn(config.timeZone);
-    res.json(buildResponse({
-      extraction: b.extraction,
-      smsText: b.sms_text,
-      hasImage: false,
-      overrides: b.overrides,
-      twixRequestId: b.twix_request_id,
-      mobileNumber: b.mobile_number,
-      config,
-      today,
-      meta: { request_id: req.id, model: null, llm_latency_ms: 0 },
-    }));
+  app.post('/v1/complaints/finalize', validate(finalizeSchema), async (req, res, next) => {
+    try {
+      const b = req.body;
+      const today = todayIn(config.timeZone);
+      // LLM is called only if a customer answer isn't in a format the built-in parser understands.
+      const resolved = await resolve(b.overrides, today);
+      res.json(buildResponse({
+        extraction: b.extraction,
+        smsText: b.sms_text,
+        hasImage: false,
+        overrides: resolved.overrides,
+        twixRequestId: b.twix_request_id,
+        mobileNumber: b.mobile_number,
+        config,
+        today,
+        meta: { request_id: req.id, model: resolved.llm.model, llm_latency_ms: resolved.llm.latency_ms },
+      }));
+    } catch (err) { next(err); }
   });
 
   /**

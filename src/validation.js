@@ -4,9 +4,8 @@ const { z } = require('zod');
 
 const overridesSchema = z.object({
   txnNo: z.string().max(64).optional(),
-  amount: z.union([z.number().nonnegative(), z.string().max(32)]).optional(),
-  date: z.string().max(10).optional().describe('YYYY-MM-DD'),
-  time: z.string().max(5).optional().describe('HH:MM, 24h'),
+  amount: z.union([z.number().nonnegative(), z.string().max(64)]).optional(),
+  time: z.string().max(100).optional().describe('Customer answer as typed: a time, a date, or both'),
   merchant: z.string().max(120).optional(),
   account_card_det: z.string().max(32).optional(),
   txnType: z.string().max(32).optional(),

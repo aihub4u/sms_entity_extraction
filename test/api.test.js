@@ -54,9 +54,16 @@ const extract = async ({ smsText, customerMessage }) => {
   return { data: f(customerMessage), model: 'stub', usage: null };
 };
 
+const normCalls = [];
+const llmNormalize = async (p) => {
+  normCalls.push(p);
+  const known = p.text === 'last Monday evening around 7';
+  return { date_iso: known ? '2026-10-26' : null, time_24h: known ? '19:00' : null, amount: null, model: 'stub-norm' };
+};
+
 let server; let base;
 before(async () => {
-  server = createApp({ config, extract }).listen(0);
+  server = createApp({ config, extract, llmNormalize }).listen(0);
   await new Promise((r) => server.once('listening', r));
   base = `http://127.0.0.1:${server.address().port}`;
 });
@@ -154,11 +161,81 @@ test('hallucinated reference number is dropped by grounding', async () => {
 test('finalize completes a previous extraction without calling the LLM', async () => {
   const first = (await post('/v1/transactions/extract', req({ sms_text: FASTAG_SMS, customer_message: 'deducted but failed' }))).body;
   const before = calls.length;
-  const r = await post('/v1/complaints/finalize', req({ extraction: first.extraction, overrides: { date: '2026-06-24', time: '18:40', account_card_det: 'x4666' } }));
-  assert.equal(calls.length, before, 'no LLM call');
+  const nBefore = normCalls.length;
+  const r = await post('/v1/complaints/finalize', req({ extraction: first.extraction, overrides: { time: '24/06/2026 18:40', account_card_det: 'x4666' } }));
+  assert.equal(calls.length, before, 'no extraction LLM call');
+  assert.equal(normCalls.length, nBefore, 'no normaliser LLM call');
   assert.equal(r.status, 200);
   assert.equal(r.body.status, 'COMPLETE');
   assert.equal(r.body.transaction.date, '24-Jun-2026');
+  assert.equal(r.body.transaction.time, '18:40');
+});
+
+test('overrides.date is not accepted (only time)', async () => {
+  const r = await post('/v1/transactions/extract', req({ sms_text: UPI_SMS, overrides: { date: '2026-06-24' } }));
+  assert.equal(r.status, 400);
+});
+
+test('SMS without date: one follow-up on field "time" asking date and time', async () => {
+  const b = (await post('/v1/transactions/extract', req({ sms_text: FASTAG_SMS, customer_message: 'deducted but failed' }))).body;
+  assert.ok(b.missing_fields.includes('date') && b.missing_fields.includes('time'));
+  const dt = b.follow_up_questions.filter((q) => q.field === 'time');
+  assert.equal(dt.length, 1);
+  assert.ok(!b.follow_up_questions.some((q) => q.field === 'date'));
+  assert.ok(dt[0].question.includes('date') && dt[0].question.includes('time'));
+});
+
+test('overrides.time accepts date, time or both in any format', async () => {
+  const first = (await post('/v1/transactions/extract', req({ sms_text: FASTAG_SMS, customer_message: 'deducted but failed' }))).body;
+  for (const [text, expDate, expTime] of [
+    ['24/06/2026 6:40 pm', '24-Jun-2026', '18:40'],
+    ['24th June 18.40', '24-Jun-2026', '18:40'],
+    ['6:40 PM on 24-06-26', '24-Jun-2026', '18:40'],
+    ['June 24, 2026 1840', '24-Jun-2026', '18:40'],
+  ]) {
+    const r = (await post('/v1/complaints/finalize', req({ extraction: first.extraction, overrides: { time: text, account_card_det: 'x4666' } }))).body;
+    assert.equal(r.status, 'COMPLETE', text);
+    assert.equal(r.transaction.date, expDate, text);
+    assert.equal(r.transaction.time, expTime, text);
+    assert.ok(r.sbi_request.type.includes(`"date":"${expDate}"`));
+  }
+});
+
+test('date-only answer in time: date filled, time asked next (still field "time")', async () => {
+  const first = (await post('/v1/transactions/extract', req({ sms_text: FASTAG_SMS, customer_message: 'deducted but failed' }))).body;
+  const r = (await post('/v1/complaints/finalize', req({ extraction: first.extraction, overrides: { time: '24 June', account_card_det: 'x4666' } }))).body;
+  assert.equal(r.transaction.date, '24-Jun-2026');
+  assert.equal(r.transaction.time, null);
+  assert.deepEqual(r.missing_fields, ['time']);
+  assert.deepEqual(r.follow_up_questions.map((q) => q.field), ['time']);
+  assert.ok(!r.warnings.some((w) => w.code === 'INVALID_OVERRIDE'));
+});
+
+test('date in time answer never replaces the date from the SMS', async () => {
+  const b = (await post('/v1/transactions/extract', req({ sms_text: UPI_SMS, customer_message: 'not me', overrides: { time: '25 June 7pm' } }))).body;
+  assert.equal(b.transaction.date, '23-Jun-2026');
+  assert.equal(b.transaction.time, '19:00');
+  assert.equal(b.status, 'COMPLETE');
+});
+
+test('conversational answer falls back to the LLM; response shape unchanged', async () => {
+  const first = (await post('/v1/transactions/extract', req({ sms_text: FASTAG_SMS, customer_message: 'deducted but failed' }))).body;
+  const before = normCalls.length;
+  const r = (await post('/v1/complaints/finalize', req({ extraction: first.extraction, overrides: { time: 'last Monday evening around 7', account_card_det: 'x4666' } }))).body;
+  assert.equal(normCalls.length, before + 1);
+  assert.equal(normCalls.at(-1).text, 'last Monday evening around 7');
+  assert.equal(r.status, 'COMPLETE');
+  assert.equal(r.transaction.date, '26-Oct-2026');
+  assert.equal(r.transaction.time, '19:00');
+  assert.deepEqual(Object.keys(r), Object.keys(first), 'same top-level response keys as /extract');
+});
+
+test('unreadable answer produces INVALID_OVERRIDE + same follow-up', async () => {
+  const first = (await post('/v1/transactions/extract', req({ sms_text: FASTAG_SMS, customer_message: 'deducted but failed' }))).body;
+  const r = (await post('/v1/complaints/finalize', req({ extraction: first.extraction, overrides: { time: 'no idea', account_card_det: 'x4666' } }))).body;
+  assert.equal(r.status, 'NEEDS_INPUT');
+  assert.ok(r.warnings.some((w) => w.code === 'INVALID_OVERRIDE' && w.field === 'time'));
+  assert.deepEqual(r.follow_up_questions.map((q) => q.field), ['time']);
 });
 
 test('invalid override values are reported, not accepted', async () => {

@@ -71,7 +71,7 @@ All `/v1` routes require the header `x-api-key: <API_KEY>` when `API_KEY` is set
 | `sms_text` | one of `sms_text` / `image` | Pasted or forwarded SMS |
 | `image` | one of `sms_text` / `image` | `{url}` or `{base64, mime_type}`, for a screenshot of the SMS or app |
 | `customer_message` | no | Free text from the customer, used to detect intent |
-| `overrides` | no | Values the bot collected from the customer. `date` = `YYYY-MM-DD`, `time` = `HH:MM` (24h); also `txnNo`, `amount`, `merchant`, `account_card_det`, `txnType` |
+| `overrides` | no | Values the bot collected from the customer: `time`, `amount`, `txnNo`, `merchant`, `account_card_det`, `txnType`. Put the customer's answer about **when** the transaction happened into `time` exactly as typed: a time, a date, or both (see below) |
 
 Response (UPI sample with "I didn't do this transaction", abridged):
 
@@ -134,6 +134,22 @@ This endpoint is the stateless follow-up and makes **no LLM call**. Send back th
 ```
 
 It returns the same response shape as `/extract`.
+
+### Free-text answers in `overrides.time`
+
+`overrides` has no `date` parameter. Whatever the customer types about when the transaction happened goes into `overrides.time` exactly as typed. The API reads the date and/or the time from it.
+
+| Customer types | Result |
+|---|---|
+| `7pm`, `7:30 PM`, `19:30`, `19.30`, `1930`, `around 10 am`, `noon` | time; parsed instantly, no LLM call |
+| `24 June`, `24/06/2026`, `24-06-26`, `24Jun26`, `yesterday` | date (used only if the SMS had no date); time is then asked for next |
+| `24/06/2026 6:40 pm`, `24th June 18.40`, `yesterday 7pm`, `6:40 pm on 24th June` | date and time; parsed instantly |
+| `last Monday evening around 7`, `day before yesterday at 8` | resolved by OpenAI relative to today (IST) |
+| `no idea`, `evening` (no hour) | not resolvable: returns an `INVALID_OVERRIDE` warning and the same follow-up question |
+
+When the SMS has no date, `missing_fields` lists both `date` and `time`, but `follow_up_questions` has a **single** entry with `field: "time"` that asks for both. The bot always puts the answer into `overrides.time`. A date the customer types never replaces a date that came from the SMS.
+
+Numeric dates are read day-first (Indian format). A date with no year is taken as the most recent past occurrence.
 
 ### `POST /v1/complaints/submit`
 

@@ -11,8 +11,9 @@ const SBI_FIELDS = ['txnNo', 'amount', 'date', 'time', 'merchant', 'account_card
 const QUESTIONS = {
   txnNo: 'Please share the transaction reference number (UTR / Ref No.) shown in your SMS or bank statement.',
   amount: 'What was the transaction amount?',
-  date: 'On which date did the transaction happen?',
+  date: 'On which date did the transaction happen? (for example, 24 June)',
   time: 'Around what time did the transaction happen? (for example, 10:30 AM)',
+  dateTime: 'On which date and around what time did the transaction happen? (for example, 24 June, 6:40 PM)',
   merchant: 'Who was the payment made to (merchant or person name)?',
   account_card_det: 'Please share the last 4 digits of the account or card that was debited.',
   txnType: 'How was the payment made? (UPI, IMPS, NEFT, card, etc.)',
@@ -44,6 +45,8 @@ function applyOverrides(fields, overrides) {
 
   for (const [key, raw] of Object.entries(overrides)) {
     if (raw === null || raw === undefined || raw === '') continue;
+    // A date read from the customer's `time` answer only fills a date the SMS didn't have.
+    if (key === 'date' && out.date) continue;
     let value = raw;
     if (key === 'amount') {
       const n = typeof raw === 'number' ? raw : Number(String(raw).split(',').join(''));
@@ -59,6 +62,28 @@ function applyOverrides(fields, overrides) {
     else { out[key] = value; provided.push(key); }
   }
   return { fields: out, provided, errors };
+}
+
+/**
+ * Date and time are both answered through `overrides.time`, so they share one
+ * follow-up entry with field "time" (asking for the date, the time, or both).
+ */
+function followUpsFor(missing) {
+  const out = [];
+  const needDate = missing.includes('date');
+  const needTime = missing.includes('time');
+  let dateTimeAdded = false;
+  for (const f of missing) {
+    if (f === 'date' || f === 'time') {
+      if (dateTimeAdded) continue;
+      dateTimeAdded = true;
+      const q = needDate && needTime ? QUESTIONS.dateTime : needDate ? QUESTIONS.date : QUESTIONS.time;
+      out.push({ field: 'time', question: q });
+    } else {
+      out.push({ field: f, question: QUESTIONS[f] || `Please provide ${f}.` });
+    }
+  }
+  return out;
 }
 
 function sha256(s) {
@@ -121,7 +146,7 @@ function buildResponse({ extraction, smsText, hasImage, overrides, twixRequestId
 
   const followUps = status === 'REJECTED'
     ? [{ field: 'sms', question: 'This does not look like a bank transaction message. ' + QUESTIONS.sms }]
-    : [...new Set(missing)].map((f) => ({ field: f, question: QUESTIONS[f] || `Please provide ${f}.` }));
+    : followUpsFor([...new Set(missing)]);
 
   // 6. Payloads
   const legacyBody = Object.fromEntries(SBI_FIELDS.map((k) => [k, fields[k] ?? '']));

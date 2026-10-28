@@ -1,0 +1,12 @@
+[
+  { "id": "yono2-imps", "label": "IMPS Fund Transfer - Yono 2.0", "sms_text": "Dear Customer, Your a/c no. XXXXXXXX4666 is debited for Rs.10.00 on 24-06-26 and a/c XXXXXXX785 credited (IMPS Ref no 617512557444). -SBI" },
+  { "id": "yono2-neft", "label": "NEFT Fund Transfer - Yono 2.0", "sms_text": "Your Ac x4666 debited Rs.10.00 for transfer to Ajinky Ac x0785 dt 24.06.26 Ref SBIN526175700272. If not done by you, call 1800111109. YONO SBI" },
+  { "id": "yono2-intrabank", "label": "With SBI Fund Transfer (other A/c) - Yono 2.0", "sms_text": "Your Ac x6047 debited Rs.1.00 for transfer to Subhas Ac x3936 dt 24.06.26 Ref 157977766. If not done by you, call 1800111109. YONO SBI" },
+  { "id": "yono2-swift", "label": "Forex Fund Transfer - Yono 2.0", "sms_text": "Dear SBI Customer, Your SWIFT transfer of USD1 with transaction ref. no. 0111125TS1594842 credited to beneficiary AC No. XXXXX2658 on 2025-12-08." },
+  { "id": "yono2-tdr", "label": "TDR-STDR - Yono 2.0", "sms_text": "Dear Customer, TDR/STDR No XXXXX499803 for INR 10,000.00 has been created on 24/06/26. Please submit form 15G/H, if eligible. Thank you for your patronage. Download YONO - SBI" },
+  { "id": "yono2-fastag-failed", "label": "FASTag Payment - Yono 2.0 (failed)", "sms_text": "ICICI Bank FASTag bill 1782288677542 of Rs.200.00 has failed.Pl try again.-YONO SBI" },
+  { "id": "upi-third-party", "label": "UPI payment - Third party app", "sms_text": "Dear UPI user A/C X1282 debited by 106.00 on date 23Jun26 trf to RAMESH KEDARNATH Refno 388062945190 If not u? call-1800111109 for other services-18001234-SBI" },
+  { "id": "yonolite-imps-alert", "label": "Yono Lite IMPS success alert", "sms_text": "Dear Customer, your a/c no. XXXXXXX3936 is debited for Rs. 10.00 on 24-06-26 and a/c XXXXXXXX178 credited (IMPS Ref no 617518812795). -SBI" },
+  { "id": "yonolite-otp-neft", "label": "Yono Lite NEFT OTP (should be flagged as OTP)", "sms_text": "482913 is OTP for your NEFT Trf of Rs.52.00 through Yono Lite SBI. Do not share this with anyone. Bank will NEVER call you to verify it.-SBI" },
+  { "id": "minb-otp-mandate", "label": "MINB E-mandate OTP (should be flagged as OTP)", "sms_text": "731045 is OTP to approve E-mandate SBI Request ID 88412 of Rs. 1500 in A/C No. XXXX4666. Do not share it with anyone. -SBI" }
+]
